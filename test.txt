@@ -1,9 +1,0 @@
-$body = @{
-    prompt = "Reviewing the typing feedback: User prefers tactile switches but dislikes high-pitched clacks. Extract profile metrics and rank top alternatives."
-    target_item_id = "kbd-mx-80"
-} | ConvertTo-Json
-
-Invoke-RestMethod -Uri "https://wakamateservices--bct-swarm-orchestrator-swarm-endpoint.modal.run/v1/swarm/process" `
-                  -Method Post `
-                  -ContentType "application/json" `
-                  -Body $body
