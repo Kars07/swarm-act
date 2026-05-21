@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Terminal, ShieldCheck, HelpCircle, CornerDownRight, Check, Copy, Activity, Sparkles } from "lucide-react";
+import { getSwarmRecommendations, getRecommendationDetails } from "../utils/swarmUtils";
 
 export default function ExecutionRuns({ runs = [], onGoToConsole }) {
   const [selectedRunId, setSelectedRunId] = useState(() => {
@@ -198,37 +199,88 @@ export default function ExecutionRuns({ runs = [], onGoToConsole }) {
                     </div>
                   )}
 
-                  {/* Recommendations badge display */}
+                  {/* Recommendations card display */}
                   {selectedRun.status === "Success" && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="border-b border-neutral-850 pb-1.5 text-neutral-500 select-none text-[10px] uppercase font-bold tracking-wide flex items-center gap-1">
                         <Sparkles size={11} className="text-violet-400" /> Final Yelp Recommendations
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedRun.beta_reasoning?.payload?.ranked_items && selectedRun.beta_reasoning.payload.ranked_items.length > 0 ? (
-                          selectedRun.beta_reasoning.payload.ranked_items.map((item, idx) => {
-                            const itemId = typeof item === 'object' && item !== null ? (item.item_id || item.ground_truth_item_id) : item;
-                            const displayId = typeof itemId === 'string' ? itemId : JSON.stringify(item);
+                      {getSwarmRecommendations(selectedRun).length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {getSwarmRecommendations(selectedRun).map((salvagedItem, idx) => {
+                            const displayId = salvagedItem.id;
+                            const details = getRecommendationDetails(displayId, selectedRun.prompt || "");
+                            
                             return (
                               <div
                                 key={idx}
-                                onClick={() => copyToClipboard(displayId)}
-                                className="group flex items-center gap-1.5 bg-[#141414] border border-neutral-850 hover:border-violet-500/50 hover:bg-neutral-900 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-all text-neutral-300"
+                                className={`bg-[#111111] border ${salvagedItem.isSalvaged ? 'border-violet-500/40 bg-gradient-to-r from-violet-950/10 to-neutral-900/40 shadow-md shadow-violet-950/5' : 'border-neutral-850'} rounded-lg p-3 hover:border-violet-500/30 transition-colors flex flex-col gap-2 relative group`}
                               >
-                                <CornerDownRight size={10} className="text-neutral-500 group-hover:text-violet-400" />
-                                <span>{displayId}</span>
-                                {copiedId === displayId ? (
-                                  <Check size={10} className="text-emerald-400" />
-                                ) : (
-                                  <Copy size={10} className="text-neutral-600 group-hover:text-neutral-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="flex justify-between items-start select-none">
+                                  <div>
+                                    <div className="flex flex-wrap items-center gap-1 mb-0.5">
+                                      <span className="text-[8px] uppercase tracking-wider font-mono text-violet-400 bg-violet-950/45 px-1 py-0.5 rounded border border-violet-800/30 inline-block">
+                                        {details.tag}
+                                      </span>
+                                      {salvagedItem.isSalvaged && (
+                                        <span className="text-[7.5px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-950/45 px-1 py-0.5 rounded border border-emerald-800/30 inline-block animate-pulse">
+                                          ✨ Cognitive Salvage
+                                        </span>
+                                      )}
+                                    </div>
+                                    <h4 className="text-white font-semibold text-[11px] font-sans">
+                                      {details.title}
+                                    </h4>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <span className="text-[9px] text-neutral-500 font-mono">#{idx + 1}</span>
+                                    <div className="flex text-amber-400">
+                                      {Array.from({ length: details.rating }).map((_, i) => (
+                                        <span key={i} className="text-[9px]">★</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <p className="text-[10px] text-neutral-400 leading-relaxed font-sans mt-0.5">
+                                  {details.reason}
+                                </p>
+                                
+                                <div className="flex justify-between items-center border-t border-neutral-900/60 pt-2 mt-1 select-none">
+                                  <span className="text-[8px] font-mono text-neutral-600 bg-neutral-950 px-1.5 py-0.5 rounded border border-neutral-850 truncate max-w-[120px]">
+                                    {displayId}
+                                  </span>
+                                  <button
+                                    onClick={() => copyToClipboard(displayId)}
+                                    className="text-[8px] font-mono text-neutral-500 hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded"
+                                  >
+                                    {copiedId === displayId ? (
+                                      <>
+                                        <Check size={8} className="text-emerald-400" />
+                                        <span>Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy size={8} />
+                                        <span>Copy ID</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                {salvagedItem.isSalvaged && (
+                                  <div className="text-[8px] text-neutral-500/70 font-mono border-t border-neutral-900/30 pt-1 select-none">
+                                    🛡️ Recovery: Salvaged from Beta monologue.
+                                  </div>
                                 )}
                               </div>
                             );
-                          })
-                        ) : (
-                          <div className="text-xs text-neutral-500 italic">No recommendations.</div>
-                        )}
-                      </div>
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-neutral-500 italic p-3 text-center bg-[#111111] border border-neutral-800 rounded-lg">
+                          No recommendations.
+                        </div>
+                      )}
                     </div>
                   )}
 

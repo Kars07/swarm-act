@@ -1,5 +1,6 @@
 import { Sparkles, Terminal, ArrowRight } from "lucide-react";
 import { useState } from "react";
+import { getSwarmRecommendations } from "../utils/swarmUtils";
 
 const columns = [
   { label: "Swarm Run" },
@@ -154,8 +155,8 @@ export default function EvaluationsTable({ runs = [], onSelectRun, onNew }) {
                   </td>
                   {/* Recs Count */}
                   <td className="px-4 py-4 font-mono text-xs text-neutral-400 whitespace-nowrap">
-                    {run.status === "Success" && run.beta_reasoning?.payload?.ranked_items
-                      ? `${run.beta_reasoning.payload.ranked_items.length} items`
+                    {run.status === "Success"
+                      ? `${getSwarmRecommendations(run).length} items`
                       : run.status === "Running"
                       ? "evaluating..."
                       : "-"}

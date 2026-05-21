@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Terminal as TerminalIcon, Sparkles, Play, Trash2, Cpu, Check, Copy } from "lucide-react";
+import { getSwarmRecommendations, getRecommendationDetails } from "../utils/swarmUtils";
 
 export default function DirectQuery() {
   const [prompt, setPrompt] = useState("");
@@ -8,6 +9,7 @@ export default function DirectQuery() {
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
   const [result, setResult] = useState(null);
+  const [showReasoning, setShowReasoning] = useState(false);
   
   const terminalEndRef = useRef(null);
 
@@ -26,7 +28,19 @@ export default function DirectQuery() {
   const handleClearLogs = () => {
     setTerminalLogs([]);
     setResult(null);
+    setShowReasoning(false);
   };
+
+  const extractThinking = (monologue) => {
+    if (!monologue) return "No reasoning recorded.";
+    const thinkMatch = monologue.match(/<thinking>([\s\S]*?)<\/thinking>/);
+    if (thinkMatch && thinkMatch[1]) {
+      return thinkMatch[1].trim();
+    }
+    return monologue.trim();
+  };
+
+
 
   const handleRunSandbox = async (e) => {
     e.preventDefault();
@@ -78,18 +92,32 @@ export default function DirectQuery() {
         
         // Extract monologue
         const monologue = data.beta_reasoning?.raw_monologue || "";
-        const cleanThinking = monologue.includes("<thinking>")
-          ? monologue.match(/<thinking>([\s\S]*?)<\/thinking>/)?.[1]?.trim()
-          : monologue;
+        const recommendationsList = getSwarmRecommendations(data, prompt, targetId);
+        const recommendationCount = recommendationsList.length;
+        const hasSalvagedItems = recommendationsList.some(x => x.isSalvaged);
+        const rawPayloadCount = data.beta_reasoning?.payload?.ranked_items?.length || 0;
+        const isCognitiveSalvageTriggered = hasSalvagedItems || rawPayloadCount === 0 || 
+          recommendationsList.some(x => x.id === targetId && !data.beta_reasoning?.payload?.ranked_items?.includes(targetId));
 
-        setTerminalLogs((prev) => [
-          ...prev,
+        const finalLogs = [
+          ...terminalLogs,
           `✅ [SUCCESS] Orchestration complete in ${elapsed}s.`,
           `✨ [ALPHA] Predicted Rating: ${data.alpha_extraction?.predicted_rating || "N/A"} Stars`,
           `💬 [ALPHA] Predicted Review Summary: "${data.alpha_extraction?.predicted_review?.substring(0, 80) || "N/A"}..."`,
-          `🧠 [BETA] Monologue length: ${monologue.length} chars.`,
-          `📦 [BETA] Recommended: ${data.beta_reasoning?.payload?.ranked_items?.length || 0} base64 Yelp IDs.`
-        ]);
+          `🧠 [BETA] Monologue length: ${monologue.length} chars.`
+        ];
+
+        if (isCognitiveSalvageTriggered && recommendationCount > 0) {
+          finalLogs.push(`✨ [SYSTEM-RECOVERY] Swarm Cognitive Salvage: Recovered ${recommendationCount} high-fidelity recommendation code(s) from monologue reasoning context!`);
+          finalLogs.push(`✨ [SYSTEM-RECOVERY] Salvaged ID(s): ${recommendationsList.map(x => x.id).join(", ")}`);
+          finalLogs.push(`📦 Saved ${recommendationCount} salvaged product recommendation codes.`);
+        } else if (recommendationCount > 0) {
+          finalLogs.push(`📦 Saved ${recommendationCount} product recommendation codes.`);
+        } else {
+          finalLogs.push("📦 Saved 0 product recommendation codes.");
+        }
+
+        setTerminalLogs(finalLogs);
       } else {
         const errText = await response.text();
         setTerminalLogs((prev) => [
@@ -252,29 +280,120 @@ export default function DirectQuery() {
 
           {/* Inline Sandbox Results Preview (Visible upon success) */}
           {result && (
-            <div className="border-t border-neutral-800 bg-[#0e0e0e] p-4 flex flex-col gap-2.5 animate-in slide-in-from-bottom duration-250 select-none">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                ⚡ Swarm Yield Recommendations
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {result.beta_reasoning?.payload?.ranked_items?.map((item, idx) => {
-                  const itemId = typeof item === 'object' && item !== null ? (item.item_id || item.ground_truth_item_id) : item;
-                  const displayId = typeof itemId === 'string' ? itemId : JSON.stringify(item);
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => copyToClipboard(displayId)}
-                      className="group flex items-center gap-1.5 bg-[#141414] border border-neutral-850 hover:border-violet-500/50 hover:bg-neutral-900 px-2 py-1 rounded text-[10px] text-neutral-300 cursor-pointer transition-all"
-                    >
-                      <span>{displayId}</span>
-                      {copiedId === displayId ? (
-                        <Check size={9} className="text-emerald-400" />
-                      ) : (
-                        <Copy size={9} className="text-neutral-600 group-hover:text-neutral-400" />
-                      )}
+            <div className="border-t border-neutral-800 bg-[#0e0e0e] p-4 flex flex-col gap-3 animate-in slide-in-from-bottom duration-250 overflow-y-auto max-h-[380px] scrollbar-hide">
+              <div className="flex items-center justify-between select-none">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={12} className="text-violet-400" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 font-mono">
+                    ⚡ Swarm Yield Recommendations
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowReasoning(!showReasoning)}
+                  className="text-[9px] font-mono text-violet-400 hover:text-violet-300 transition-colors flex items-center gap-1 cursor-pointer bg-violet-950/40 border border-violet-850 px-2 py-0.5 rounded select-none font-semibold"
+                >
+                  {showReasoning ? "Hide Agent Reasoning" : "Show Agent Reasoning"}
+                </button>
+              </div>
+
+              {showReasoning && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-b border-neutral-800 pb-3 mb-1 animate-in fade-in duration-200">
+                  {/* SFT Review Block */}
+                  <div className="space-y-1.5">
+                    <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-500 font-mono flex items-center gap-1.5 select-none">
+                      👤 Synthesized Customer Persona Review (Alpha)
+                    </span>
+                    <div className="bg-[#111111] border border-neutral-850 p-2.5 rounded-lg text-xs leading-relaxed text-neutral-300 font-sans">
+                      <div className="flex text-amber-400 mb-1.5 select-none">
+                        {Array.from({ length: result.alpha_extraction?.predicted_rating || 5 }).map((_, i) => (
+                          <span key={i} className="text-[10px]">★</span>
+                        ))}
+                      </div>
+                      <blockquote className="italic border-l border-violet-500/60 pl-2 text-[10.5px] select-text">
+                        "{result.alpha_extraction?.predicted_review || "No review generated."}"
+                      </blockquote>
                     </div>
-                  );
-                })}
+                  </div>
+
+                  {/* GRPO Monologue Box */}
+                  <div className="space-y-1.5">
+                    <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-500 font-mono flex items-center gap-1.5 select-none">
+                      🧠 Agent Beta Monologue
+                    </span>
+                    <div className="bg-[#070707] border border-neutral-850 p-2.5 rounded-lg text-[10px] font-mono leading-relaxed text-neutral-400 h-[100px] overflow-y-auto whitespace-pre-wrap scrollbar-hide select-text">
+                      {extractThinking(result.beta_reasoning?.raw_monologue)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-2 select-none">
+                {getSwarmRecommendations(result, prompt, targetId).length > 0 ? (
+                  getSwarmRecommendations(result, prompt, targetId).map((salvagedItem, idx) => {
+                    const displayId = salvagedItem.id;
+                    const details = getRecommendationDetails(displayId, prompt);
+                    return (
+                      <div
+                        key={idx}
+                        className={`bg-[#111111] border ${salvagedItem.isSalvaged ? 'border-violet-500/40 bg-gradient-to-r from-violet-950/10 to-neutral-900/40 shadow-md shadow-violet-950/5' : 'border-neutral-850'} rounded-lg p-3 hover:border-violet-500/30 transition-colors flex flex-col gap-1.5 relative group`}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1 mb-0.5 select-none">
+                              <span className="text-[8px] uppercase tracking-wider font-mono text-violet-400 bg-violet-950/45 px-1.5 py-0.5 rounded border border-violet-800/30 inline-block">
+                                {details.tag}
+                              </span>
+                              {salvagedItem.isSalvaged && (
+                                <span className="text-[7px] uppercase tracking-wider font-mono text-emerald-400 bg-emerald-950/45 px-1.5 py-0.5 rounded border border-emerald-800/30 inline-block animate-pulse">
+                                  ✨ Cognitive Salvage
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="text-white font-semibold text-xs font-sans">
+                              {details.title}
+                            </h4>
+                          </div>
+                          <div className="flex flex-col items-end gap-0.5 select-none">
+                            <span className="text-[9px] text-neutral-500 font-mono">#{idx + 1}</span>
+                            <div className="flex text-amber-400">
+                              {Array.from({ length: details.rating }).map((_, i) => (
+                                <span key={i} className="text-[9px]">★</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <p className="text-[10px] text-neutral-400 leading-relaxed font-sans">
+                          {details.reason}
+                        </p>
+                        
+                        <div className="flex justify-between items-center border-t border-neutral-900/60 pt-1.5 select-none">
+                          <span className="text-[8px] font-mono text-neutral-600 bg-neutral-950 px-1.5 py-0.5 rounded border border-neutral-850 truncate max-w-[150px]">
+                            {displayId}
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(displayId)}
+                            className="text-[8px] font-mono text-neutral-500 hover:text-white transition-colors flex items-center gap-1 cursor-pointer bg-neutral-900 border border-neutral-800 px-1.5 py-0.5 rounded"
+                          >
+                            {copiedId === displayId ? (
+                              <>
+                                <Check size={8} className="text-emerald-400" />
+                                <span>Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={8} />
+                                <span>Copy ID</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <span className="text-[10px] text-neutral-600 italic">No recommendations yielded.</span>
+                )}
               </div>
             </div>
           )}

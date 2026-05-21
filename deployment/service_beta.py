@@ -244,12 +244,10 @@ class BetaService:
                 q_clean = q.strip()
                 if not q_clean:
                     continue
-                # Check if it matches a standard 22-char base64 Yelp ID
-                is_base64_id = len(q_clean) == 22 and re.match(r'^[a-zA-Z0-9_\-]{22}$', q_clean)
-                # Check if it matches a preset target ID pattern (e.g. ramen_shop_992, cafe_cafe_883)
-                is_preset_id = re.match(r'^[a-zA-Z0-9]+_[a-zA-Z0-9_]+_\d+$', q_clean)
+                # Support 3-50 length alphanumeric, hyphens, and underscores for custom hackathon IDs
+                is_valid_id = 3 <= len(q_clean) <= 50 and re.match(r'^[a-zA-Z0-9_\-]+$', q_clean)
                 
-                if is_base64_id or is_preset_id:
+                if is_valid_id:
                     candidates.append(q_clean)
                     
             # Remove duplicates while preserving order
@@ -293,10 +291,9 @@ class BetaService:
                                 item_str = item
                                 
                             item_clean = item_str.strip()
-                            # Check if the extracted string matches Yelp Base64 format or preset ID
-                            is_base64_id = len(item_clean) == 22 and re.match(r'^[a-zA-Z0-9_\-]{22}$', item_clean)
-                            is_preset_id = re.match(r'^[a-zA-Z0-9]+_[a-zA-Z0-9_]+_\d+$', item_clean)
-                            if is_base64_id or is_preset_id:
+                            # Support 3-50 length alphanumeric, hyphens, and underscores for custom hackathon IDs
+                            is_valid_id = 3 <= len(item_clean) <= 50 and re.match(r'^[a-zA-Z0-9_\-]+$', item_clean)
+                            if is_valid_id:
                                 sanitized_items.append(item_clean)
                                 
                     parsed_candidate["ranked_items"] = sanitized_items

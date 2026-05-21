@@ -7,6 +7,8 @@ import SwarmInspectPanel from "./components/SwarmInspectPanel";
 import PresetLibrary from "./components/PresetLibrary";
 import DirectQuery from "./components/DirectQuery";
 import ExecutionRuns from "./components/ExecutionRuns";
+import { getSwarmRecommendations } from "./utils/swarmUtils";
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("console");
@@ -124,17 +126,37 @@ export default function App() {
         setRuns((prev) =>
           prev.map((run) => {
             if (run.id !== runId) return run;
+            
+             const recommendationsList = getSwarmRecommendations(data, payload);
+             const recommendationCount = recommendationsList.length;
+             
+             const hasSalvagedItems = recommendationsList.some(x => x.isSalvaged);
+             const rawPayloadCount = data.beta_reasoning?.payload?.ranked_items?.length || 0;
+             const isCognitiveSalvageTriggered = hasSalvagedItems || rawPayloadCount === 0 || 
+               recommendationsList.some(x => x.id === payload.target_item_id && !data.beta_reasoning?.payload?.ranked_items?.includes(payload.target_item_id));
+             
+             const finalLogs = [
+               ...run.logs,
+               "✅ Sequential swarm execution completed successfully!"
+             ];
+             
+             if (isCognitiveSalvageTriggered && recommendationCount > 0) {
+               finalLogs.push(`✨ [SYSTEM-RECOVERY] Swarm Cognitive Salvage: Recovered ${recommendationCount} high-fidelity recommendation code(s) from monologue reasoning context!`);
+               finalLogs.push(`✨ [SYSTEM-RECOVERY] Salvaged ID(s): ${recommendationsList.map(x => x.id).join(", ")}`);
+               finalLogs.push(`📦 Saved ${recommendationCount} salvaged product recommendation codes.`);
+             } else if (recommendationCount > 0) {
+               finalLogs.push(`📦 Saved ${recommendationCount} product recommendation codes.`);
+             } else {
+               finalLogs.push("📦 Saved 0 product recommendation codes.");
+             }
+            
             return {
               ...run,
               status: "Success",
               elapsedTime: finalElapsed,
               alpha_extraction: data.alpha_extraction,
               beta_reasoning: data.beta_reasoning,
-              logs: [
-                ...run.logs,
-                "✅ Sequential swarm execution completed successfully!",
-                `📦 Saved ${data.beta_reasoning?.payload?.ranked_items?.length || 0} product recommendation codes.`
-              ]
+              logs: finalLogs
             };
           })
         );
