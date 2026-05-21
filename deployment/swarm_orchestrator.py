@@ -1,11 +1,11 @@
 import modal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import urllib.request
+import requests
 import json
 
 # The orchestrator is extremely lightweight because it does not host models locally
-orchestrator_image = modal.Image.debian_slim().pip_install("langgraph", "fastapi", "pydantic")
+orchestrator_image = modal.Image.debian_slim().pip_install("langgraph", "fastapi", "pydantic", "requests")
 
 app = modal.App("bct-swarm-orchestrator")
 web_app = FastAPI()
@@ -32,19 +32,19 @@ class SwarmRequest(BaseModel):
     target_item_id: str
 
 def execute_alpha_node(state: SwarmState) -> Dict:
-    payload = json.dumps({"prompt": state["user_prompt"], "target_item_id": state["target_item_id"]}).encode("utf-8")
-    req = urllib.request.Request(ALPHA_SERVICE_URL, data=payload, headers={"Content-Type": "application/json"})
-    
-    with urllib.request.urlopen(req) as response:
-        res = json.loads(response.read().decode())
+    payload = {"prompt": state["user_prompt"], "target_item_id": state["target_item_id"]}
+    response = requests.post(ALPHA_SERVICE_URL, json=payload)
+    if response.status_code != 200:
+        raise Exception(f"Alpha Service failed with status {response.status_code}: {response.text}")
+    res = response.json()
     return {"alpha_parsed_json": res["parsed_json"]}
 
 def execute_beta_node(state: SwarmState) -> Dict:
-    payload = json.dumps({"prompt": state["user_prompt"], "alpha_insight": state["alpha_parsed_json"]}).encode("utf-8")
-    req = urllib.request.Request(BETA_SERVICE_URL, data=payload, headers={"Content-Type": "application/json"})
-    
-    with urllib.request.urlopen(req) as response:
-        res = json.loads(response.read().decode())
+    payload = {"prompt": state["user_prompt"], "alpha_insight": state["alpha_parsed_json"]}
+    response = requests.post(BETA_SERVICE_URL, json=payload)
+    if response.status_code != 200:
+        raise Exception(f"Beta Service failed with status {response.status_code}: {response.text}")
+    res = response.json()
     return {"beta_raw_output": res["raw_output"], "beta_parsed_json": res["parsed_json"]}
 
 # =====================================================================
