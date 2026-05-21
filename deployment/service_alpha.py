@@ -115,7 +115,8 @@ class AlphaService:
             temperature=0.15,
             repetition_penalty=1.15,
             max_tokens=256,
-            stop_token_ids=[self.tokenizer.eos_token_id]
+            stop_token_ids=[self.tokenizer.eos_token_id],
+            stop=["<|im_end|>", "<|im_start|>", "<|eot_id|>", "<|end_of_text|>", "\n<|im_start|>", "\nuser\n", "\nassistant\n", "\nuser:", "\nassistant:"]
         )
         
         request_id = str(uuid.uuid4())

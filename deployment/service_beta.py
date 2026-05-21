@@ -111,12 +111,13 @@ class BetaService:
         
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         
-        # Max tokens increased to 1024 to accommodate reasoning tags
+        # Max tokens increased to 2048 to accommodate longer reasoning tags
         sampling_params = SamplingParams(
             temperature=0.15,
             repetition_penalty=1.15,
-            max_tokens=1024,
-            stop_token_ids=[self.tokenizer.eos_token_id]
+            max_tokens=2048,
+            stop_token_ids=[self.tokenizer.eos_token_id],
+            stop=["<|im_end|>", "<|im_start|>", "<|eot_id|>", "<|end_of_text|>", "\n<|im_start|>", "\nuser\n", "\nassistant\n", "\nuser:", "\nassistant:"]
         )
         
         request_id = str(uuid.uuid4())
@@ -190,12 +191,132 @@ class BetaService:
                 print(f"Failed to repair JSON: {repaired}. Error: {e}")
                 return {}
 
+        def extract_ranked_items_fallback(text: str) -> list:
+            # 1. Strip thinking tags
+            clean_text = text
+            for tag in ["</thinking>", "</think>"]:
+                if tag in clean_text:
+                    clean_text = clean_text.split(tag)[-1]
+                    break
+                    
+            # 2. Search for the LAST occurrence of "ranked_items" or "<ranking_result>"
+            target_area = clean_text
+            matches = list(re.finditer(r'"ranked_items"\s*:\s*', clean_text, re.IGNORECASE))
+            if matches:
+                target_area = clean_text[matches[-1].end():]
+                # Find matching brackets if possible
+                start_bracket = target_area.find('[')
+                if start_bracket != -1:
+                    bracket_count = 0
+                    end_bracket = -1
+                    for i, char in enumerate(target_area[start_bracket:]):
+                        if char == '[':
+                            bracket_count += 1
+                        elif char == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                end_bracket = start_bracket + i
+                                break
+                    if end_bracket != -1:
+                        target_area = target_area[start_bracket:end_bracket+1]
+                    else:
+                        target_area = target_area[start_bracket:]
+            else:
+                tag_matches = list(re.finditer(r'<ranking_result>', clean_text, re.IGNORECASE))
+                if tag_matches:
+                    target_area = clean_text[tag_matches[-1].end():]
+                    end_tag = re.search(r'</ranking_result>', target_area, re.IGNORECASE)
+                    if end_tag:
+                        target_area = target_area[:end_tag.start()]
+
+            # Extract all possible candidates (both quoted strings and raw words)
+            candidates = []
+            
+            # Extract quoted strings
+            quoted = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', target_area)
+            # Also extract raw words that look like base64 IDs or preset IDs
+            raw_words = re.findall(r'\b[a-zA-Z0-9_\-]{10,40}\b', target_area)
+            
+            potential_ids = quoted + raw_words
+            
+            # Filter candidates by length and structure
+            for q in potential_ids:
+                q_clean = q.strip()
+                if not q_clean:
+                    continue
+                # Check if it matches a standard 22-char base64 Yelp ID
+                is_base64_id = len(q_clean) == 22 and re.match(r'^[a-zA-Z0-9_\-]{22}$', q_clean)
+                # Check if it matches a preset target ID pattern (e.g. ramen_shop_992, cafe_cafe_883)
+                is_preset_id = re.match(r'^[a-zA-Z0-9]+_[a-zA-Z0-9_]+_\d+$', q_clean)
+                
+                if is_base64_id or is_preset_id:
+                    candidates.append(q_clean)
+                    
+            # Remove duplicates while preserving order
+            seen = set()
+            final_candidates = []
+            for c in candidates:
+                if c not in seen:
+                    seen.add(c)
+                    final_candidates.append(c)
+                    
+            return final_candidates
+
+        def extract_and_parse_beta_json(text: str) -> dict:
+            # 1. Strip any thinking blocks to avoid monologue interference
+            clean_text = text
+            for tag in ["</thinking>", "</think>"]:
+                if tag in clean_text:
+                    parts = clean_text.split(tag)
+                    clean_text = parts[-1]
+            
+            clean_text = clean_text.strip()
+            
+            # 2. Find all '{' positions in reverse order (from end to start)
+            brace_indices = [i for i, char in enumerate(clean_text) if char == '{']
+            
+            # Try from the last '{' to the first
+            for idx in reversed(brace_indices):
+                candidate_area = clean_text[idx:].strip()
+                parsed_candidate = repair_and_parse_json(candidate_area)
+                if parsed_candidate and "ranked_items" in parsed_candidate:
+                    # Post-process and sanitize ranked_items to extract string IDs and strip monologue pollution
+                    raw_items = parsed_candidate["ranked_items"]
+                    sanitized_items = []
+                    if isinstance(raw_items, list):
+                        for item in raw_items:
+                            # If it's a dictionary structure (like {"rank": 0, "item_id": "..."})
+                            item_str = ""
+                            if isinstance(item, dict):
+                                item_str = item.get("item_id", item.get("ground_truth_item_id", ""))
+                            elif isinstance(item, str):
+                                item_str = item
+                                
+                            item_clean = item_str.strip()
+                            # Check if the extracted string matches Yelp Base64 format or preset ID
+                            is_base64_id = len(item_clean) == 22 and re.match(r'^[a-zA-Z0-9_\-]{22}$', item_clean)
+                            is_preset_id = re.match(r'^[a-zA-Z0-9]+_[a-zA-Z0-9_]+_\d+$', item_clean)
+                            if is_base64_id or is_preset_id:
+                                sanitized_items.append(item_clean)
+                                
+                    parsed_candidate["ranked_items"] = sanitized_items
+                    return parsed_candidate
+                    
+            # Fallback to standard repair on the clean text if no reverse matches succeeded
+            return repair_and_parse_json(clean_text)
+
         parsed = {}
         try:
-            # Isolate the JSON part strictly after the thinking tags
-            json_area = raw_gen.split("</thinking>")[-1].strip() if "</thinking>" in raw_gen else raw_gen
-            parsed = repair_and_parse_json(json_area)
+            parsed = extract_and_parse_beta_json(raw_gen)
         except Exception as e:
             print(f"Extraction parsing warning: {e}")
+            
+        if not parsed or "ranked_items" not in parsed or not parsed["ranked_items"]:
+            try:
+                fallback_items = extract_ranked_items_fallback(raw_gen)
+                if fallback_items:
+                    parsed = {"ranked_items": fallback_items}
+            except Exception as e:
+                print(f"Fallback parsing warning: {e}")
             
         return {"raw_output": raw_gen, "parsed_json": parsed}

@@ -78,7 +78,10 @@ async def process_swarm_pipeline(req: SwarmRequest):
             "status": "success",
             "alpha_extraction": final_state["alpha_parsed_json"],
             "beta_reasoning": {
-                "raw_monologue": final_state["beta_raw_output"].split("</thinking>")[0] + "</thinking>" if "</thinking>" in final_state["beta_raw_output"] else "No thinking block.",
+                "raw_monologue": (
+                    final_state["beta_raw_output"].split("</thinking>")[0] + "</thinking>" if "</thinking>" in final_state["beta_raw_output"]
+                    else (final_state["beta_raw_output"].split("</think>")[0] + "</think>" if "</think>" in final_state["beta_raw_output"] else "No thinking block.")
+                ),
                 "payload": final_state["beta_parsed_json"]
             }
         }
