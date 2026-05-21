@@ -10,6 +10,16 @@ orchestrator_image = modal.Image.debian_slim().pip_install("langgraph", "fastapi
 app = modal.App("bct-swarm-orchestrator")
 web_app = FastAPI()
 
+# Add CORS Middleware to enable browser access from anywhere
+from fastapi.middleware.cors import CORSMiddleware
+web_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # =====================================================================
 # PASTE YOUR DEPLOYED SERVICE ENDPOINTS HERE
 # =====================================================================
