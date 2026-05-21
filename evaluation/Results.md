@@ -37,3 +37,16 @@ Rating Accuracy (RMSE)       : 1.6414  (Lower is better)
 Review Quality (ROUGE-L)     : 0.1682  (Higher is better)
 
 
+
+
+
+==========================================
+FINAL SFT EVALUATION REPORT: ALPHA
+==========================================
+Total Evaluated Dataset Size : 1000
+Successfully Parsed JSON     : 1000
+Failed / Malformed Outputs   : 0
+Rating Accuracy (RMSE)       : 1.6208  (Lower is better)
+Review Quality (ROUGE-L)     : 0.1380  (Higher is better)
+
+
