@@ -1,4 +1,4 @@
-@app.function(@app.function(
+@app.function(
     image=swarm_image,
     volumes={"/workspace/data": storage_volume},
     timeout=7200, # 2 hours for massive dataset processing
