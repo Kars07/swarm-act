@@ -200,14 +200,30 @@ $$J_{\text{GRPO}}(\theta) = \mathbb{E} \left[ q \sim P(Q), \{o_i\}_{i=1}^G \sim 
 
 Where:
 - $q$ is the input prompt sampled from the dataset.
-- $\{o_i\}_{i=1}^G$ are the $G$ completions sampled from the current policy $\pi_{\theta_{old}}$.
-- $r_i(\theta) = \frac{\pi_{\theta}(o_i|q)}{\pi_{\theta_{old}}(o_i|q)}$ is the importance sampling ratio.
+- $\{o_i\}_{i=1}^G$ are the $G$ completions sampled from the current policy $\pi_{\theta_{\text{old}}}$.
+- $r_i(\theta) = \frac{\pi_{\theta}(o_i \mid q)}{\pi_{\theta_{\text{old}}}(o_i \mid q)}$ is the importance sampling ratio.
 - $\beta$ is the Kullback-Leibler (KL) divergence penalty weight.
 - $D_{\text{KL}}$ is the divergence penalty preventing the policy $\pi_{\theta}$ from drifting too far from the reference SFT model $\pi_{\text{ref}}$.
 
 To ensure unbiased estimation of the KL penalty at the token level, we utilize Schulman’s estimator:
 
-$$D_{\text{KL}}(\pi_{\theta} \parallel \pi_{\text{ref}}) = \frac{\pi_{\text{ref}}(y_t | x, y_{<t})}{\pi_{\theta}(y_t | x, y_{<t})} - \ln \frac{\pi_{\text{ref}}(y_t | x, y_{<t})}{\pi_{\theta}(y_t | x, y_{<t})} - 1$$
+$$
+D_{\text{KL}}(\pi_{\theta} \parallel \pi_{\text{ref}})
+=
+\frac{
+\pi_{\text{ref}}(y_t \mid x, y_{<t})
+}{
+\pi_{\theta}(y_t \mid x, y_{<t})
+}
+-
+\ln
+\frac{
+\pi_{\text{ref}}(y_t \mid x, y_{<t})
+}{
+\pi_{\theta}(y_t \mid x, y_{<t})
+}
+- 1
+$$
 
 ### 4.2 Alignment Hyperparameters
 The GRPO alignment is performed on Modal using an NVIDIA H100 with the following configuration:
