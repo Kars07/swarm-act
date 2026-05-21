@@ -1,15 +1,13 @@
 import modal
 from fastapi import Request
 
+# Restored the NVIDIA Devel image so the compiler is present
 image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
+    .apt_install("git", "build-essential")
     .pip_install("vllm", "fastapi", "ninja", "safetensors")
-    .env({
-        "VLLM_USE_FLASHINFER_SAMPLER": "0", 
-        "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-        "VLLM_FP8_KERNEL_BACKEND": "none",
-        "VLLM_SKIP_WARMUP": "1"  # <--- THIS IS THE CRITICAL KILL-SWITCH
-    })
+    # Explicitly disable FlashInfer sampling to prevent C++ JIT crashes
+    .env({"VLLM_USE_FLASHINFER_SAMPLER": "0", "VLLM_WORKER_MULTIPROC_METHOD": "spawn"})
 )
 
 app = modal.App("bct-beta-service")
@@ -84,7 +82,7 @@ class BetaService:
         engine_args = AsyncEngineArgs(
             model=base_model_path,
             tensor_parallel_size=1,
-            gpu_memory_utilization=0.85,
+            gpu_memory_utilization=0.90,
             max_model_len=4096,
             enforce_eager=True,  
             enable_lora=True,
@@ -137,14 +135,66 @@ class BetaService:
             
         raw_gen = final_output.strip()
         
+        # Robust JSON repair and parse function
+        def repair_and_parse_json(text: str) -> dict:
+            try:
+                return json.loads(text)
+            except Exception:
+                pass
+                
+            start_idx = text.find('{')
+            if start_idx == -1:
+                return {}
+            
+            candidate = text[start_idx:].strip()
+            
+            end_idx = candidate.rfind('}')
+            if end_idx != -1:
+                try:
+                    return json.loads(candidate[:end_idx+1])
+                except Exception:
+                    pass
+                    
+            if candidate.endswith(']'):
+                try:
+                    return json.loads(candidate + '}')
+                except Exception:
+                    pass
+                    
+            open_braces = candidate.count('{')
+            close_braces = candidate.count('}')
+            open_brackets = candidate.count('[')
+            close_brackets = candidate.count(']')
+            
+            repaired = candidate
+            quotes = repaired.count('"')
+            if quotes % 2 != 0:
+                repaired += '"'
+                
+            if open_brackets > close_brackets:
+                repaired = repaired.rstrip(', \n\r')
+                if not repaired.endswith('"') and not repaired.endswith(']'):
+                    last_quote = repaired.rfind('"')
+                    if last_quote != -1:
+                        repaired = repaired[:last_quote+1]
+                repaired += ']'
+                
+            open_braces = repaired.count('{')
+            close_braces = repaired.count('}')
+            if open_braces > close_braces:
+                repaired += '}' * (open_braces - close_braces)
+                
+            try:
+                return json.loads(repaired)
+            except Exception as e:
+                print(f"Failed to repair JSON: {repaired}. Error: {e}")
+                return {}
+
         parsed = {}
         try:
             # Isolate the JSON part strictly after the thinking tags
             json_area = raw_gen.split("</thinking>")[-1].strip() if "</thinking>" in raw_gen else raw_gen
-            start_idx = json_area.find('{')
-            end_idx = json_area.rfind('}')
-            if start_idx != -1 and end_idx != -1:
-                parsed = json.loads(json_area[start_idx:end_idx+1])
+            parsed = repair_and_parse_json(json_area)
         except Exception as e:
             print(f"Extraction parsing warning: {e}")
             
